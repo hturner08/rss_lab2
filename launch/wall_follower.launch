@@ -3,4 +3,9 @@
   <node pkg="wall_follower" name="wall_follower" type="wall_follower.py" output="screen">
     <rosparam command="load" file="$(find wall_follower)/params.yaml"/>
   </node>
+  <!-- <node pkg="wall_follower" name="tf_broadcaster" type="tf_broadcaster.py" output="screen">
+    <param name="~child_frame_id" value="wall_follower"/>
+    <param name="~parent_frame_id" value="base_link"/>
+    </node> -->
+  <!-- <param name="/use_sim_time" value="true"/> -->
 </launch>
