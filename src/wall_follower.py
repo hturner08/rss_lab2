@@ -2,7 +2,6 @@
 import random
 
 import numpy as np
-
 import rospy
 import tf.transformations as tr
 import tf2_ros
@@ -39,18 +38,22 @@ class WallFollower:
     WALL_TOPIC = "/wall"
     DISTANCE_THRESHOLD = .1  # meters
     SCAN_PARAMETERS = None
-    LOOKAHEAD_DISTANCE = 3  # meters
+    LOOKAHEAD_DISTANCE = 1  # meters
 
     features = None
 
-    def __init__(self, Kp=10, Ki=5, Kd=5):
+    def __init__(self, Kp=5, Ki=0, Kd=9):
         """
         Initializes the node, name it, and subscribe to the scan topic.
 
         Args:
 
         """
-
+        self.Kp = Kp
+        self.Ki = Ki
+        self.Kd = Kd
+        self.e_prev = 0
+        self.e_sum = 0
         self.drive_pub = rospy.Publisher(
             self.DRIVE_TOPIC, AckermannDriveStamped, queue_size=1)
         self.scan_sub = rospy.Subscriber(
@@ -66,20 +69,14 @@ class WallFollower:
         try:
             robot_trans = tfBuffer.lookup_transform(
                 'base_link', 'laser_model', rospy.Time(0), rospy.Duration(1.0)).transform
+            p = np.array([robot_trans.translation.x,
+                          robot_trans.translation.y, robot_trans.translation.z])
+            q = np.array([robot_trans.rotation.x, robot_trans.rotation.y,
+                          robot_trans.rotation.z, robot_trans.rotation.w])
+            self.robot_arr = tr.quaternion_matrix(q)
+            self.robot_arr[0:3, -1] = p
         except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException) as e:
             rospy.loginfo("%s", e)
-        p = np.array([robot_trans.translation.x,
-                      robot_trans.translation.y, robot_trans.translation.z])
-        q = np.array([robot_trans.rotation.x, robot_trans.rotation.y,
-                      robot_trans.rotation.z, robot_trans.rotation.w])
-        self.robot_arr = tr.quaternion_matrix(q)
-        self.robot_arr[0:3, -1] = p
-        self.Kp = Kp
-        self.Ki = Ki
-        self.Kd = Kd
-        self.e_prev = 0
-        self.e_sum = 0
-        self.time = rospy.Time.now().to_sec()
 
     def scan_callback(self, msg):
         """ 
@@ -94,13 +91,14 @@ class WallFollower:
         self.points = geom.convert_scan_to_points(msg, side=self.SIDE)
         # self.features = [(self.points[0], self.points[-1])]
         self.features = self.process_points(self.points)
-        curr_dist = self.cal_dist_from_wall()
-        self.controller(curr_dist)
-        self.visualize_features(curr_dist)
+        curr_dist, curr_deriv, angle = self.cal_dist_from_wall()
+        self.controller(curr_dist, curr_deriv, angle)
+        self.visualize_features(curr_dist, angle)
 
     def process_points(self, points):
         # features = line_finders.split_and_merge(points)
-        features = line_finders.plain_ols(points)
+        # features = line_finders.ransac(points)
+        features = line_finders.plain_ols(points, self.SIDE)
         return features
 
     def cal_dist_from_wall(self):
@@ -108,12 +106,19 @@ class WallFollower:
         Gets the distance from the wall.
         """
         dist = np.inf
+        deriv = 0.0
+        angle = 0.0
         for feature in self.features:
-            dist = min(dist, geom.get_distance(
+            new_dist = abs(geom.get_distance(
                 feature[2], feature[3], np.zeros(2)))
-        return dist
+            if new_dist < dist:
+                dist = new_dist
+                deriv = self.VELOCITY * feature[2] / feature[3] * dist
+                # Closest point on line to another point is along perpendicular line
+                angle = np.arctan(feature[2])
+        return dist, deriv, angle
 
-    def controller(self, dist):
+    def controller(self, dist, deriv, angle):
         """
         Controls the robot based on the distance from the wall.
 
@@ -121,17 +126,11 @@ class WallFollower:
             dist (float): Distance from the wall.
         """
         vel = self.VELOCITY
-        dt = self.time - rospy.Time.now().to_sec()
-        self.time = rospy.Time.now().to_sec()
-        e = self.DESIRED_DISTANCE - dist
-        dedt = (e-self.e_prev)/dt
-        heading = 2*vel/self.LOOKAHEAD_DISTANCE * \
-            (dedt + vel/self.LOOKAHEAD_DISTANCE*e)
-        # self.e_sum += e*dt
-        # heading = self.Kp * e + self.Ki * self.e_sum + self.Kd * dedt
-        self.e_prev = e
-        # self.drive(self.VELOCITY, 0)  # TODO: Add PID Controller
-        self.drive(vel, heading)
+        e = self.SIDE*(dist - self.DESIRED_DISTANCE)
+        dedt = angle
+        heading = self.Kd*dedt + self.Kp*e
+        self.heading = min(.34, max(-.34, heading))
+        self.drive(vel, self.heading)
         if self.DEBUG:
             rospy.loginfo("Distance from wall: %f", dist)
             rospy.loginfo("Current velocity: %f", vel)
@@ -149,7 +148,7 @@ class WallFollower:
         msg.drive.steering_angle = steering
         self.drive_pub.publish(msg)
 
-    def visualize_features(self, dist):
+    def visualize_features(self, dist, angle):
         """
         Visualizes the features.
         """
@@ -159,7 +158,8 @@ class WallFollower:
 
         VisualizationTools.plot_line([self.points[0][0], self.points[-1][0]], [
                                      self.points[0][1], self.points[-1][1]], self.debug_pub, color=(0, 1, 0), frame="/laser_model")
-        VisualizationTools.plot_text(str(dist), self.text_pub, 1)
+        VisualizationTools.plot_text(
+            "Dist:" + str(dist) + "\n" + "Heading:" + str(self.heading) + "\n" + "Angle:" + str(angle), self.text_pub, 1)
 
 
 def make_transform(arr, frame_name, parent='world'):

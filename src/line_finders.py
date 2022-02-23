@@ -1,10 +1,35 @@
 import geom
 import numpy as np
-
+import warnings
 # TODO: Implement RANSACC
 
 
-def plain_ols(points):
+def ransac(points, iterations=100, threshold=0.05, min_points=100):
+    """
+    Uses the RANSAC algorithm to extract line from the given points. Defaults to OLS 
+
+    Args:
+        points (np.ndarray): Array containing the laser scan points in cartesian coordinates.
+
+    Returns:
+        features (list): List of line features containing a single line segment and its parameters.
+    """
+    for i in range(iterations):
+        indices = np.random.choice(points.shape[0], min_points, replace=False)
+        np.sort(indices)
+        subset = points[indices, :]
+        m, b = np.polyfit(subset[:, 0], subset[:, 1], 1)
+        inliers = []
+        for j in range(points.shape[0]):
+            if geom.get_distance(m, b, points[j]) < threshold:
+                inliers.append(j)
+        if len(inliers)/len(points) > 0.75:
+            return [(points[indices[0], :], points[indices[-1], :], m, b)]
+    warnings.warn("RANSAC failed to find a line. Defaulting to Plain OLS.")
+    return plain_ols(points)
+
+
+def plain_ols(points, side=None):
     """
     Uses ordinary least squares to extract line from the given points.
 
@@ -14,8 +39,18 @@ def plain_ols(points):
     Returns:
         features (list): List of line features containing a single line segment and its parameters.
     """
-    m, b = np.polyfit(points[:, 0], points[:, 1], 1)
-    return [(points[0, :], points[-1, :], m, b)]
+    size = points.shape[0]
+    # if side == 1:
+    #     start = size//6
+    #     end = 7*size//12
+    # elif side == -1:
+    #     start = size//2
+    #     end = size//2 + size//3
+    # else:
+    start = 0
+    end = size
+    m, b = np.polyfit(points[start:end, 0], points[start:end, 1], 1)
+    return [(points[start, :], points[min(end, size-1), :], m, b)]
 
 
 def split_and_merge(points, m_thresh=0.1, b_thresh=0.1):

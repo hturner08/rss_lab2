@@ -1,8 +1,9 @@
 #!/usr/bin/env python2
 import numpy as np
+import math
 
 
-def convert_scan_to_points(msg, keep_all=False, side=None):
+def convert_scan_to_points(msg, range_max=2.5, keep_all=False, side=None):
     """
     Converts the given ROS LaserScan polar coordinate ranges to a list of points
 
@@ -29,13 +30,13 @@ def convert_scan_to_points(msg, keep_all=False, side=None):
     points = np.empty((len(msg.ranges), 2))*np.nan
     angle = angle_min
     while angle < angle_max and i < len(msg.ranges)-1:
-        if msg.ranges[i] > msg.range_min and msg.ranges[i] < msg.range_max:
+        if msg.ranges[i] > msg.range_min and msg.ranges[i] < range_max:
             points[i, 0] = msg.ranges[i] * np.cos(angle)
             points[i, 1] = msg.ranges[i] * np.sin(angle)
         angle += msg.angle_increment
         i += 1
     if i == len(msg.ranges)-1:
-        if msg.ranges[-1] > msg.range_min and msg.ranges[-1] < msg.range_max:
+        if msg.ranges[-1] > msg.range_min and msg.ranges[-1] < range_max:
             points[-1, :] = (msg.ranges[-1] * np.cos(msg.angle_max),
                              msg.ranges[-1] * np.sin(msg.angle_max))
     if keep_all:
