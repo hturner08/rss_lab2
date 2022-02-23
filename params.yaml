@@ -1,6 +1,6 @@
 scan_topic: "/scan"
 drive_topic: "/drive"
 side: 1
-velocity: 0.5
+velocity: .5
 desired_distance: 1.
 debug: false
